@@ -108,6 +108,7 @@ def detect(frame):
     cv2.imshow('output', frame)
     return frame
 
+
 def humanDetector(args):
     image_path = args["image"]
     video_path = args['video']
