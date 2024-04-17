@@ -1,27 +1,81 @@
 from flask import Flask, Response, json
 import numpy as np
 import cv2
-import RPi.GPIO as GPIO  # Imports the standard Raspberry Pi GPIO library
+import RPi.GPIO as GPI
 from time import sleep
 import math
+from datetime import datetime
+from gpiozero import LED
 
 app = Flask(__name__)
 
+# globale Variablen
+# ein Bild vom Stream
 global_frame = None
-global_winkel = None
 
-# Set up pin 11 for PWM
+# Winkel von Servomotoren
+global_winkel = None
+global_winkel2 = None
+
+# Definition den Pins der Raspberry Pi 3B Platte
 OUT_PIN = 11
+OUT_PIN_RElAY = 40
 PULSE_FREQ = 50
+GPIO_TRIGGER = 7
+GPIO_ECHO = 12
+
 GPIO.cleanup()
 GPIO.setmode(GPIO.BOARD)
 GPIO.setup(11, GPIO.OUT)
+GPIO.setup(40, GPIO.OUT)
+
+# Richtung der GPIO-Pins festlegen (IN / OUT)
+GPIO.setup(GPIO_TRIGGER, GPIO.OUT)
+GPIO.setup(GPIO_ECHO, GPIO.IN)
+GPIO.setmode(GPIO.BOARD)  # Use physical pin numbering
+GPIO.setup(32, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
 
-# Ungefähr 3 Sekunden pro 180 Grade (Wert = 10)
+def distanz():
+
+    GPIO.setmode(GPIO.BOARD)
+    GPIO_TRIGGER = 13
+    GPIO_ECHO = 12
+
+    GPIO.setup(GPIO_TRIGGER, GPIO.OUT)
+    GPIO.setup(GPIO_ECHO, GPIO.IN)
+    # setze Trigger auf HIGH
+    GPIO.output(GPIO_TRIGGER, True)
+
+    # setze Trigger nach 0.01ms aus LOW
+    sleep(0.00001)
+    GPIO.output(GPIO_TRIGGER, False)
+
+    StartZeit = datetime.now()
+    StopZeit = datetime.now()
+
+    # Startzeit ist gespreichert
+    while GPIO.input(GPIO_ECHO) == 0:
+        StartZeit = datetime.now()
+
+    # speichere Ankunftszeit
+    while GPIO.input(GPIO_ECHO) == 1:
+        StopZeit = datetime.now()
+
+    # die Differenz zwischen Start und Ankunft
+    TimeElapsed = StopZeit - StartZeit
+    # mit der Schallgeschwindigkeit (34300 cm/s) multiplizieren
+    # und durch 2 teilen, da hin und zurück
+    distanz = (TimeElapsed * 34300) / 2
+
+    return distanz
+
+
+
 def generate_frames():
-    # OpenCV Video Capture
-    cap = cv2.VideoCapture(0)  # Change the parameter to the index of the camera
+    # OpenCV Funktionalität
+    # 0 - die erste Kamera im System
+    cap = cv2.VideoCapture(0)
 
     while True:
         success, frame = cap.read()  # Read frame from camera
@@ -68,6 +122,7 @@ def imageShot():
 
 @app.route('/get_kamera_winkel')
 def getCurrentPosition():
+
     global global_winkel
 
     return str(global_winkel)
@@ -75,6 +130,7 @@ def getCurrentPosition():
 
 @app.route('/move_right')
 def moveMotorRight():
+
     global global_winkel
 
     GPIO.setmode(GPIO.BOARD)
@@ -84,9 +140,7 @@ def moveMotorRight():
         global_winkel += 1
     else:
         global_winkel = 12
-        print("The border is reached")
-
-
+        print("Die Grenze ist erreicht")
 
     p = GPIO.PWM(11, 50)  # Sets up pin 11 as a PWM pin
     p.start(0)  # Starts running PWM on the pin and sets it to 0
@@ -114,7 +168,6 @@ def moveMotorLeft():
         print("The border is reached")
     else:
         global_winkel = 2
-
 
     p = GPIO.PWM(11, 50)  # Sets up pin 11 as a PWM pin
     p.start(0)  # Starts running PWM on the pin and sets it to 0
@@ -145,8 +198,7 @@ def moveMotor(winkel):
     delay = math.ceil(((abs(int(global_winkel) - int(winkel))) * 0.3))
     if delay < 0.5:
         delay = 0.5
-    print("move global_winkel = ", str(global_winkel))
-    print("move winkel = ", str(winkel))
+
     global_winkel = int(winkel)
 
     p = GPIO.PWM(11, 50)  # Sets up pin 11 as a PWM pin
@@ -160,12 +212,69 @@ def moveMotor(winkel):
 
     return getSuccessfullResponse()
 
+# für 2 Servomotor
+@ app.route('/move_motor2/<winkel>')
+def moveMotor2(winkel):
+    global global_winkel2
+
+    GPIO.setmode(GPIO.BOARD)
+    GPIO.setup(15, GPIO.OUT)
+
+    delay = math.ceil(((abs(int(global_winkel) - int(winkel))) * 0.3))
+    if delay < 0.5:
+        delay = 0.5
+
+    global_winkel2 = int(winkel)
+
+    p = GPIO.PWM(15, 50)  # Sets up pin 11 as a PWM pin
+    p.start(0)  # Starts running PWM on the pin and sets it to 0
+    p.ChangeDutyCycle(int(winkel))  # Changes the pulse width to winkel (so moves the servo)
+
+    sleep(delay)  ###### hier zu erdenken, was zu tun. ohne Sleep funktioniert Bewegung funktioniert nicht.
+    p.stop()  # am Ende muss PWM gestoppt werden
+
+    return getSuccessfullResponse()
+
+@app.route('/rote_led')
+def rote_led():
+
+    roteled = LED("GPIO21")
+    roteled.on()
+    sleep(1)
+    roteled.off()
+
+    return getSuccessfullResponse()
+
+
+@app.route('/gruene_led')
+def gruene_led():
+
+    grüneled = LED("GPIO20")
+    grüneled.on()
+    sleep(1)
+    grüneled.off()
+
+    return getSuccessfullResponse()
+
+
+@app.route('/gelbe_led')
+def gelbe_led():
+
+    gelbeled = LED("GPIO16")
+    gelbeled.on()
+    sleep(1)
+    gelbeled.off()
+
+    return getSuccessfullResponse()
+
 
 @app.route('/json_sensors_state')
 def jsonSensorsState():
+
+    distaz_ = str(distanz())
     data = {
-        "parameter1": "value1",
-        "parameter2": "value2"
+        "distanz": distaz_,
+        "winkel": global_winkel
     }
 
     return json.dumps(data)
@@ -178,6 +287,7 @@ def index():
 
 
 def getSuccessfullResponse():
+
     return app.response_class(
         response=json.dumps({"status": "success", "code": 0}),
         status=200,
@@ -188,4 +298,5 @@ def getSuccessfullResponse():
 if __name__ == "__main__":
     initMotor()
     generate_frames()
-    app.run(host='0.0.0.0', port=8000, debug=True, threaded=True)  # Run the server on port 8000
+
+    app.run(host='0.0.0.0', port=8000, debug=True, threaded=True)
