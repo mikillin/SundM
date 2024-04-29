@@ -1,4 +1,4 @@
-# iportieren notwendige Bbliotheken
+# das Import der erforderlichen Bibliotheken
 import urllib.request
 import urllib.request
 
@@ -9,14 +9,22 @@ import requests
 import time
 
 
-# zu erhalten das Bild vom EDGE-Gerät
-def getRemoteImage():
-    # die Definition von der IP-Adresse des EDGE-Geräts
-    # die IP-Adresse kann lokal sein, sowie aus dem Internet
-    url = 'http://172.20.10.2:8000/image_shot'  # locale IP-Adresse
-    # url = 'http://78.94.176.119:8000/image_shot'  #statische Internet IP-Adresse
+#Name des Fenster vom Videostream
+NAME_DES_FENSTER = "Signalverarbeitung und Mustererkennung"
 
-    # zu erhalten dsa Bild vom Response und das Bild passen zu formatieren
+# Lokale IP-Adresse des EDGE-Geräts
+URL = 'http://192.168.178.130:8000'
+
+
+# Statische IP-Adresse des EDGE-Geräts, wenn Gerät durch den Internet zugegriffen werden muss
+# url = 'http://78.94.176.119:8000/image_shot'
+
+# die Funktion fordert ein Bild vom EDGE-Gerät an
+def getRemoteImage():
+    # REST-URL von der Bildquelle
+    url = URL + '/image_shot'
+
+    #  Formatieren des erhalten Bilds vom Response
     with urllib.request.urlopen(url) as resp:
         image = np.asarray(bytearray(resp.read()), dtype="uint8")
         image = cv2.imdecode(image, cv2.IMREAD_COLOR)
@@ -24,218 +32,235 @@ def getRemoteImage():
     return image
 
 
-# Die Hauptmethode
+# Die Hauptmethode mit der Hauptlogik
 def main():
-    # das Foto vom Besizer zu definieren
-    owner_image = face_recognition.load_image_file("owner.png")
+    # Initialisierung der Variable "bewegungIdentifitiert"
+    bewegungIdentifitiert = False
 
-    # Merkmale zu dekodieren vom Foto des Besitzers
+    # solange kein Besucher identifiziert ist, müssen keine weitere Schritte unternommen werden
+    while not bewegungIdentifitiert:
+
+        url_REST = URL + "/isvisited"
+        # Auslesen des Statuses von dem Bewegungssensor
+        r = requests.get(url=url_REST)
+
+        if (int(r.text) == 1):
+            bewegungIdentifitiert = True
+            break
+
+        # Zeitraum zwischen den Anfragen
+        time.sleep(2)
+
+    # Foto des Besitzers muss definiert werden
+    owner_image = face_recognition.load_image_file("Besitzer.png")
+
+    # Merkmale des Fotos des Besitzers zu dekodieren
     owner_face_encoding = face_recognition.face_encodings(owner_image)[0]
 
-    # Wenn viele Besizer es gibt, können alle Fotos hinzugefügt werden
+    # Wenn viele Besitzer angegeben werden müssen, können alle Fotos hinzugefügt werden
     known_face_encodings = [
         owner_face_encoding
     ]
-    # den entsprechenden Namen zu definieren
+    # Den entsprechenden Namen müssen  definiert werden
     known_face_names = [
-        "Owner"
+        "Besitzer"
     ]
 
-    # die Inizializsation des HOG Descriptor
+    # Initialisierung den HOG-Deskriptoren
     hog = cv2.HOGDescriptor()
 
-    # die Inizialization des SVM-Detektors auf dem Grund von HOG Descriptor
+    # Initialization den SVM-Detektoren laut den HOG Deskriptoren
     hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 
-    # zu Starten eine neue Thread, um viele Clients zusammenarbeiten zu können
+    # Start eines neuen Threads, um viele Clients zusammenarbeiten zu können
     cv2.startWindowThread()
 
-    # zu INzialisiren den Servomotor
-    URL = 'http://172.20.10.2:8000/motor_init'  # start streaming
+    # Initialization des Servomotors
+    url_REST = URL + '/motor_init'
 
-    # zu ausführen den REST-Request
-    r = requests.get(url=URL)
+    # Ausführung des REST-Befehls
+    requests.get(url=url_REST)
 
-    # wiel keine Persnonen erkennt sein, muss die Program 1 Sekunde warten und danach wieder die Operation requestieren
-    bewegungIdentifitiert = True  # todo
-
-    ## jemand ist erkannt
-
-    # zuerst müssen die Kameras von Links nach rechts sich bewegen
+    # Initialisierung der Richtung der Bewegung der Kamera.
     direction = 1
 
+    # Solange jemand in der Nähe sich befindet, muss die Kamera die identifizierte Persone beobachten
     while (bewegungIdentifitiert):
 
-        # abhängig von Servomotor abzuwarten, wenn der motor die bewegung ducrhgeführt haben wird
-        time.sleep(0.5)  # 0.3 Sekunden für 18 Grade
+        # abhängig vom Servomotor ist es notwendig abzuwarten, bis zum Moment,
+        # wann der Motor die Bewegung durchgeführt haben wird
 
-        # zu erhalten das Foto vom Kamera
-        frame = getRemoteImage()
-
-        # zu speichern das Foto aufm Speicherakrte
-        cv2.imwrite("image.jpg", frame)
-        # abwarten, um die opertaion bis zum Ende fertig gemach zu können
+        # 0.3 Sekunden reichen, um der Servomotor auf 18 Grade sich drehen zu kännen.
+        # Der Wert ist abhängig vom Typ des Servomotors
         time.sleep(0.5)
 
-        # zu zeigen das Foto aufm bildschirm
-        cv2.imshow("frame", frame)
+        # Foto von der Kamera  des EDGE-Geräts zu erhalten
+        frame = getRemoteImage()
 
-        ##Gisichtserkennung
-        # zu ändern das Foto in dem Richtigen Format
+        #  Foto auf die Speicherkarte für spätere Analyse zu speichern
+        cv2.imwrite("image.jpg", frame)
+
+        # Pause, um die Raspberry Pi Platte den Befehl bis zum Ende ausführen zu können
+        time.sleep(0.5)
+
+        # Foto aufm Bildschirm zu zeigen
+        cv2.imshow(NAME_DES_FENSTER, frame)
+
+        # Gesichtserkennung
+        # Foto laut des passenden Formats muss  formatiert werden
         rgb_frame = np.ascontiguousarray(frame[:, :, ::-1])
 
-        # zu finden die Positionen des Gesichtes
+        # Suche nach der Positionen den Gesichter
         face_locations = face_recognition.face_locations(rgb_frame)
 
-        # zu erncodieren des erkannten Gesichten
+        # Erkannte Gesichter werden kodiert
         face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
 
-        # Jedes Gesicht zu bearbeiten
+        # Jedes Gesicht wird bearbeitet
         for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-            # die Nitialisaion des Names der arkennten Person
-            name = "Unknown"
-            # zu finden bekannte Gesichte
+
+            # Initialisation des Namens der erkennten Person
+            name = "Unbekannt"
+
+            # Bekannte Gesichter werden gesucht
             matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
 
-            # zufinden dias Gesicht, dass Ähnlich ambestens dem bekannten GEsciht
+            # Gesicht, dass ähnlich ambestens dem bekannten Gesciht ist, wird gefunden
             face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
             best_match_index = np.argmin(face_distances)
-            # jemand ist anerkannt
+            # Eine Person ist in der Nähe und ist identifiziert
             if matches[best_match_index]:
                 name = known_face_names[best_match_index]
-                # die Person ist als "Owner" eingegeben
-                if name == "Owner":
-                    #zu schiekne request grüne LED zu erzeigen
-                    URL = 'http://172.20.10.2:8000/gruene_led'  # start streaming
-                    r = requests.get(url=URL)
+                # Das Foto von der Person ist als "Besitzer" gegeben
+                if name == "Besitzer":
+                    # in diesem Fall muss die grüne LED angeschaltet werden
+                    url_REST = URL + "/green_led"  # start streaming
+                    requests.get(url=url_REST)
             else:
-                # zu schiekne request rote LED zu erzeigen
-                URL = 'http://172.20.10.2:8000/rote_led'  # start streaming
-                r = requests.get(url=URL)
+                # ansonsten muss die rote LED angeschaltet werden
+                url_REST = URL + "/red_led"  # start streaming
+                requests.get(url=url_REST)
 
-            # hinzuzfügen die Rahmen auf dem Gesicht auf dem Bild
+            # Mit der Rahmen müssen alle Gesichter auf dem Bild markiert werden
             cv2.rectangle(frame, (left - 50, top - 50), (right + 50, bottom + 50), (0, 0, 255), 2)
 
-            # hinzuzfügen den Namen auf dem Bild
+            # Neben der Rahmen auf dem Bild muss der Name der Person angeschrieben werden
             cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
-            # zu definieren den Schreift für die ANschreibungen
+            # Für den Text muss der Schrift definiert werden
             font = cv2.FONT_HERSHEY_DUPLEX
-            # hinzuzufügen den Namen auf dem Bild
+            # Name muss auf dem Bild  hinzugefügt werden
             cv2.putText(frame, name, (left + 6, bottom - 6), font, 1.0, (255, 255, 255), 1)
 
-            #zu zeigen das bild aufm Bildschirm
-            cv2.imshow('frame', frame)
+            # Das Bild muss auf dem Bildschirm angezeigt werden
+            cv2.imshow('Signalverarbeitung und Mustererkennung', frame)
 
-        #für alle gefundenn Gesichte
+        # Wenn Person nicht aufm Foto zentriert sein, muss Kamera sich drehen
+        # alle Gesichter müssen verarbeitet werden
         for (xA, yA, xB, yB) in face_locations:
-            # zu zeigen das erneute Bild aufm Bildschirm
-            cv2.imshow('Bildverarbeitung', frame)
+            # das erneute Bild muss aufm Bildschirm angezeigt werden
+            cv2.imshow('Signalverarbeitung und Mustererkennung', frame)
 
-            #zu finden wo die person ist
+            # Kalkulation des Zentrums, wo die erkannte Person sich befindet
             xCenter = (left + right) / 2
 
-            # zu erhalten die Breite vom Foto
+            # die Breite vom Foto muss kalkuliert werden
             Width = frame.shape[1]
-            Height = frame.shape[0]  # für die zukunftige Recherche. Für den 2 Servomotor
-
-            #zu definiren die IP Adresse des EDGE-Geräts
-            URL = "http://172.20.10.2:8000/"
-
-            #wenm die Person von Links sich befindet
-            if (xCenter < Width / 4):
-                URL += "move_left"
-                cv2.rectangle(frame, (xA, yA), (xB, yB),
-                              (0, 0, 255), 2)
-
-            # wenm die Person von Rechts sich befindet
-            elif (xCenter > 3 * Width / 4):
-                URL += "move_right"
-                cv2.rectangle(frame, (xA, yA), (xB, yB),
-                              (0, 0, 255), 2)
-            # wenn der servomotor sich bewegen soll
-            if 'move' in URL:
-                r = requests.get(url=URL)
-            break
-
-        # wenn es erkannte Gisichte gibt, erneut sich das Bildschirm mit einem neuen  Foto
-        if (len(face_locations) > 0):
-            cv2.imshow("frame", frame)
-            continue
-
-        #Wenn keine gesichte erkannt sind aber jemand ist in der Nähe
-        #zu verwenden HOG-Algorithmus
-        boxes, weights = hog.detectMultiScale(frame, winStride=(8, 8))
-
-        #wenn jemand ist in der Sicht von der Kamera
-        if len(boxes) > 0:
-            personGefunden = True
-        # wenn jemand nicht ist in der Sicht von der Kamera
-        else:
-            personGefunden = False
-
-            #zu erhalten den Servomotorszustand
-            URL = "http://172.20.10.2:8000/get_kamera_winkel"
-            r = requests.get(url=URL)
-
-            #wenn die Grenze erreicht ist, muss die einrichtung gewechselt werden
-            if (int(r.text) == 12 or int(r.text) == 2):
-                direction *= -1
-
-            #anhängig von dem richtung ui zu definieren den richtigen REST-Service
-            if (direction == 1):
-                URL = "http://172.20.10.2:8000/move_right"
-            else:
-                URL = "http://172.20.10.2:8000/move_left"
-
-            # zu schicken das request
-            r = requests.get(url=URL)
-
-            #abwarten bis zum Ende der Operation
-            time.sleep(0.3)
-            continue
-
-        #jjemand ist in der Sicht der Kamera
-        boxes = np.array([[x, y, x + w, y + h] for (x, y, w, h) in boxes])
-
-        # für alle gefundenen Persone
-        for (xA, yA, xB, yB) in boxes:
-            # hinzuzufügen die rahen auf dem Foto
-            cv2.rectangle(frame, (xA, yA), (xB, yB),
-                          (0, 255, 0), 2)
-
-            xCenter = (xB + xA) / 2
-
-            Width = frame.shape[1]
-
-            # zu definiern den EDGE-gerät URL
-            URL = "http://172.20.10.2:8000/"
 
             # wenn die Person von Links sich befindet
             if (xCenter < Width / 4):
-                # move_left
-                URL += "move_left"
+                url_REST = URL + "move_left"
+
+                #Person muss in diesem Fall mit roten Rahmen markiert werden
                 cv2.rectangle(frame, (xA, yA), (xB, yB),
                               (0, 0, 255), 2)
+
             # wenn die Person von Rechts sich befindet
             elif (xCenter > 3 * Width / 4):
-                # move_right
-                URL += "move_right"
+                url_REST = URL + "move_right"
+                # Person muss in diesem Fall mit roten Rahmen markiert werden
+                cv2.rectangle(frame, (xA, yA), (xB, yB),
+                              (0, 0, 255), 2)
+            # wenn der Servomotor sich bewegen soll, wird ein Request dem EDGE-Gerät abgeschickt werden
+            if 'move' in url_REST:
+                requests.get(url=url_REST)
+            break
+
+        # wenn es erkannte Gesichter gibt, erneuert sich das Bildschirm mit einem neuen Foto
+        cv2.imshow(NAME_DES_FENSTER, frame)
+        if (len(face_locations) > 0):
+            continue
+
+        # Wenn keine Gesichter erkannt sind aber jemand  in der Nähe ist
+        # wird der HOG-Algorithmus verwendet
+        boxes, weights = hog.detectMultiScale(frame, winStride=(8, 8))
+
+        # wenn niemand ist mit der Kamera identifiziert
+        if len(boxes) == 0:
+
+            # Servomotorszustand muss bekannt sein
+            url_REST = URL + "/get_camera_angle"
+            r = requests.get(url=url_REST)
+
+            # wenn die Grenze des Servomotors erreicht ist, muss die Richtung der Drehung gewechselt werden
+            if (int(r.text) == 12 or int(r.text) == 2):
+                direction *= -1
+
+            # abhängig von der ehemaligen Richtung der Bewegung der Kamera,
+            # muss das entsprechende Request zu EDGE-Gerät abgeschickt werden
+            if (direction == 1):
+                url_REST = URL + "/move_right"
+            else:
+                url_REST = URL + "/move_left"
+
+            # Befehl zu schicken
+            requests.get(url=url_REST)
+
+            # Bis zum Ende der Operation abzuwarten
+            time.sleep(0.3)
+            continue
+
+        # zumindest ein Besucher ist mit der Kamera identifiziert
+        boxes = np.array([[x, y, x + w, y + h] for (x, y, w, h) in boxes])
+
+        # alle Persone aufm Foto müssen verarbeitet werden
+        for (xA, yA, xB, yB) in boxes:
+            # Rahmen müssen auf dem Foto hinzugefügt werden, um Person zu markieren
+            cv2.rectangle(frame, (xA, yA), (xB, yB),
+                          (0, 255, 0), 2)
+
+            #das Zentrum von der Person aufm Bild ist notwendig zu kalkulieren
+            xCenter = (xB + xA) / 2
+
+            #Die Breite des Bildes muss kalkuliert werden, um zu definieren, wo  die Person aufm Foto sich befindet.
+            Width = frame.shape[1]
+
+            # wenn die Person von Links sich befindet, muss die Kamera nach rechts sich drehen
+            if (xCenter < Width / 4):
+                url_REST = URL + "/move_left"
+                #Person muss in diesem Fall mit roten Rahmen markiert werden
+                cv2.rectangle(frame, (xA, yA), (xB, yB),
+                              (0, 0, 255), 2)
+            # wenn die Person von Rechts sich befindet, muss die Kamera nach links sich drehen
+            elif (xCenter > 3 * Width / 4):
+                url_REST = URL + "/move_right"
+                #Person muss in diesem Fall mit roten Rahmen markiert werden
                 cv2.rectangle(frame, (xA, yA), (xB, yB),
                               (0, 0, 255), 2)
 
-            # zu zeigen das Foto aufm Bildschirm
-            cv2.imshow('frame', frame)
+            # das erneute Bild muss aufm Bildschirm angezeigt werden
+            cv2.imshow(NAME_DES_FENSTER, frame)
 
-            #wenn der Servomotor sich bewegen muss
-            if 'move' in URL:
-                r = requests.get(url=URL)
+            # wenn der Servomotor sich bewegen muss, wird das Request abgeschickt werden
+            if 'move' in url_REST:
+                requests.get(url=url_REST)
             break
+
         # wenn der Benutzer eine Taste drückt, muss die Program beendet werden
         if cv2.waitKey(1) & 0xFF == ord('q'):
             cv2.destroyAllWindows()
             break
 
 
-# zu starten die Program
+# Funktion startet den Algorithmen
 if __name__ == "__main__":
     main()
